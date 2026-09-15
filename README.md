@@ -18,14 +18,22 @@ No vector search experience assumed. If you brought a coding agent, point it at
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # paste in the URL and read-only key you were emailed
 python setup_check.py
 ```
 
+There is no key to paste. The cluster URL and a read-only API key ship in this
+repo sealed as `.env.enc`, and `setup_check.py` asks once for the workshop
+password — the facilitator reads it out at the start of the session — then
+writes a `.env` for you. Nothing echoes while you type it, and `.env` is
+gitignored.
+
+If you are doing this before the session and do not have the password yet, run
+the two lines above; the check will tell you what it is waiting for.
+
 `setup_check.py` prints one green line when you are ready. If it fails it names
 the check and the fix — that is the only file you need to read to get unstuck.
-It also confirms your key is read-only (without writing anything) and tells you
-how many points carry an `image` vector, which is trap 1 in numbers.
+It also confirms the key has not expired and is read-only — without writing
+anything — and reports how many points carry an `image` vector.
 **Do this before the session, not during it.**
 
 ## The contract
@@ -91,7 +99,10 @@ through `sparse`.
 ### Capability menu
 
 Roughly in order of how much they usually buy you. Full reference with runnable
-examples in [`docs/query-api.md`](docs/query-api.md).
+examples — and the failure modes each one has — is in
+[`docs/query-api.md`](docs/query-api.md). Read it before you reach for `image`
+or a score formula; there are a few ways to get a plausible-looking ranked list
+out of a query that is quietly wrong.
 
 | lever | what it does |
 |---|---|
@@ -101,24 +112,9 @@ examples in [`docs/query-api.md`](docs/query-api.md).
 | **`FormulaQuery`** | re-score a prefetched list using payload — margin, reviews, stock. |
 | **Decay** — `lin` / `exp` / `gauss` | soft preference along a number (price near $60) instead of a hard cut. |
 | **`Recommend`** | more-like-this from `seed_asin`. Strategies: `average_vector`, `best_score`, `sum_scores`. |
-| **`image`** + `HasVectorCondition` | visual similarity, on the 20% that have it. |
+| **`image`** | visual similarity. Read the vector table above before you use it. |
 | **Weighted RRF** — `RrfQuery(rrf=Rrf(weights=...))` | make one retriever count more than the other. |
 | **MMR** — `NearestQuery(nearest=..., mmr=Mmr(diversity=...))` | trade a little relevance for a less repetitive top 10. The direct lever on brand diversity. |
-
-### Three traps
-
-1. **`image` exists on only 19,997 of 100,000 points.** Any query touching
-   `image` must gate on
-   `models.Filter(must=[models.HasVectorCondition(has_vector="image")])` or it
-   silently searches a fifth of the corpus and you will never notice.
-2. **Stored image vectors came from `qdrant/clip-vit-b-32-vision`.**
-   Text-to-image search requires `qdrant/clip-vit-b-32-text`. Image-to-image
-   works as-is. This one fails loudly — a 500 from inference, or a 400
-   dimension error — unlike trap 1, which is silent.
-3. **`rating` barely discriminates; `review_count` does.** There are no unrated
-   products, and 94.4% of the corpus is rated ≥ 3.0 with a p90 of exactly 5.0.
-   Boosting on `rating` reshuffles near-ties and costs relevance. `review_count`
-   spans 1 to 118,988 — that is where the signal is.
 
 ## Scoring
 
@@ -246,9 +242,9 @@ python fixture/verify_api.py    # check every shape in docs/query-api.md still r
 - **429 / "rate limited"** — ~40 people share one cluster and Cloud Inference
   throttles. Wait a moment and re-run. Not a bug in your query. The harness caps
   concurrency at 4 for this reason; leave it there.
-- **Zero results from an image query** — you probably did not gate on
-  `HasVectorCondition`, or used the vision model id to embed text. See trap 1
-  and 2.
+- **Zero, few, or nonsense results from an image query** — `image` is not like
+  the other two vectors. Re-read its row in the vector table, check which model
+  built it, and count how many points actually carry one.
 - **`build_query returned X, expected models.QueryRequest`** — you returned a
   response, a list, or `None`.
 - **Anything else** — `python setup_check.py` first.

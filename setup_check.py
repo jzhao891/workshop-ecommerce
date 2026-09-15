@@ -52,20 +52,43 @@ def main() -> None:
 
     import os
     from common import load_env
+    import credentials
+
+    # If the repo ships sealed credentials and there is no .env yet, ask for the
+    # workshop password once and write one.
+    unlocked = credentials.ensure_env()
     load_env()
     url = os.environ.get("QDRANT_URL")
     if not url:
         fail("credentials", "QDRANT_URL is not set",
-             "copy .env.example to .env and paste in the URL and key you were "
-             "emailed:\n           cp .env.example .env")
+             "if you have a .env.enc, run this again and enter the workshop "
+             "password.\n           Otherwise copy .env.example to .env and fill "
+             "it in:\n           cp .env.example .env")
     local = is_local(url)
     if not local and not os.environ.get("QDRANT_API_KEY"):
         fail("credentials", "QDRANT_API_KEY is not set (needed for the cloud cluster)",
              "put your read-only key in .env as QDRANT_API_KEY=...")
 
+    # 4. The key has not expired --------------------------------------------
+    # Qdrant cloud keys are JWTs with a hard expiry. Expired, every call comes
+    # back as a bare 401, which reads like a typo in the URL and sends people
+    # hunting in the wrong place.
+    api_key = os.environ.get("QDRANT_API_KEY")
+    if api_key and (exp := credentials.key_expiry(api_key)):
+        import datetime as _dt
+        days = (exp - _dt.datetime.now(_dt.timezone.utc)).days
+        if days < 0:
+            fail("key expiry",
+                 f"this workshop key expired on {exp:%Y-%m-%d}",
+                 "ask the workshop host for a new key. Nothing you change "
+                 "locally will fix this.")
+        if days <= 2:
+            print(f"{YELLOW}note{RESET}: this key expires {exp:%Y-%m-%d %H:%M UTC} "
+                  f"-- tell the host if the workshop is after that.")
+
     client, url = make_client()
 
-    # 4. Cluster reachable --------------------------------------------------
+    # 5. Cluster reachable --------------------------------------------------
     try:
         client.get_collections()
     except Exception as e:
@@ -75,7 +98,7 @@ def main() -> None:
              "proxy that blocks outbound 6333/443.\n"
              "           If you are on the local fixture, start it: bash fixture/up.sh")
 
-    # 5. The key is read-only -----------------------------------------------
+    # 6. The key is read-only -----------------------------------------------
     # Participants are meant to hold a read-only key. Handing out the wrong one
     # is a facilitator mistake that nobody notices until something is deleted.
     #
@@ -104,7 +127,7 @@ def main() -> None:
                  "read-only one and replace QDRANT_API_KEY in .env.\n"
                  "           Do not use the write key -- the cluster is shared.")
 
-    # 6. Collection exists --------------------------------------------------
+    # 7. Collection exists --------------------------------------------------
     try:
         exists = client.collection_exists(COLLECTION)
     except Exception as e:
@@ -122,7 +145,7 @@ def main() -> None:
              "your key may point at the wrong cluster -- re-check QDRANT_URL.\n"
              "           On the local fixture: python fixture/seed_fixture.py")
 
-    # 7. Point count --------------------------------------------------------
+    # 8. Point count --------------------------------------------------------
     try:
         count = client.count(COLLECTION, exact=True).count
     except Exception as e:
@@ -142,7 +165,7 @@ def main() -> None:
              "persists, tell the workshop host; do not try to fix it yourself, "
              "your key is read-only.")
 
-    # 8. Cloud Inference actually works under this key -----------------------
+    # 9. Cloud Inference actually works under this key -----------------------
     # This is the check that matters. A read-only key that can read the
     # collection can still be unable to run inference, and you would not find
     # out until the room is live.
@@ -168,7 +191,7 @@ def main() -> None:
              "the dense query ran but returned zero results",
              "that should be impossible on a loaded collection -- tell the host.")
 
-    # 9. Sparse/BM25 round trip ---------------------------------------------
+    # 10. Sparse/BM25 round trip ---------------------------------------------
     # Stored sparse vectors and the query-side BM25 must tokenise the same way.
     # If they ever diverge this returns nothing, and it is much better to learn
     # that here than mid-exercise.
@@ -197,6 +220,8 @@ def main() -> None:
     except Exception:
         image_note = ""
 
+    if unlocked:
+        print(unlocked)
     where = "local fixture" if local else "cloud cluster"
     print(f"{GREEN}All checks passed{RESET} -- {where} at {url}, "
           f"{COLLECTION} with {count:,} points{image_note}, dense + sparse "
