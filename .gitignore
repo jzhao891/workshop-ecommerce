@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.workshop/
+fixture/dev_set.fixture.jsonl
+.DS_Store

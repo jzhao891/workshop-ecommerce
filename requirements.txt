@@ -1,0 +1,8 @@
+# Pinned against Qdrant server 1.19.1. Do not float these.
+qdrant-client==1.19.0
+
+# Only needed to run against the LOCAL podman fixture, where models.Document is
+# embedded on your machine. Against the cloud cluster, Qdrant Cloud Inference
+# does the embedding and this is dead weight -- but it is small and harmless,
+# and having it means the same checkout works offline.
+fastembed==0.8.0
