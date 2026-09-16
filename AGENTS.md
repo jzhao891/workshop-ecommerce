@@ -156,6 +156,14 @@ judged against 2,000 invented products whose `image` vectors are deterministic
 noise. Locally, image ranking is meaningless and the scores mean only that your
 query runs.
 
+## Handing in
+
+`python submit.py` validates the file and opens the submission form. It builds
+four query shapes, one of which carries `brand`, `min_rating` and `min_price`
+together -- constraint keys no visible question uses -- and it blocks sockets
+while `build_query` runs. Run it before telling the person you are done; a
+submission that fails these checks scores zero on every question.
+
 ## Shared cluster
 
 ~40 people and one cluster. `harness.py` caps concurrency at 4 — leave it. If

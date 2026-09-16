@@ -169,6 +169,7 @@ answers.
 python harness.py               # score yourself
 python harness.py --show dev03  # see the top 10 for one question
 python harness.py --html        # see the results as product photos in a browser
+python submit.py                # check your function and hand it in
 ```
 
 You get a table like this one. These are the scores of the starter code, so
@@ -260,6 +261,29 @@ irrelevant products. Meanwhile `head_term` stays at 1.000 whatever you do.
 Anything you apply to every question uniformly will pay for one kind of question
 with another.
 
+## Handing In Your Work
+
+```bash
+python submit.py
+```
+
+This checks your function before you send it, copies it to your clipboard, and
+opens the submission form. Paste it in, add your name, and submit.
+
+The checks matter more than the convenience. `submit.py` builds four different
+query shapes, including one carrying constraint keys that none of the 14 visible
+questions use, and it blocks network access while your function runs. A
+submission that doesn't import, returns the wrong type, or reaches out to
+another service scores zero on **every** question, so it's far better to learn
+that here than after the deadline.
+
+You can submit as many times as you like. The last one before the cutoff counts,
+so hand in something that works early and improve it.
+
+If the clipboard doesn't work on your machine, `submit.py` says so and you can
+copy the file by hand. If the form is blocked, email or message your
+`build_query.py` to the facilitator instead.
+
 ## Running Against a Local Copy
 
 Everyone in the room shares one database. If you'd rather work against your own
@@ -319,4 +343,5 @@ python fixture/verify_api.py    # check the reference examples still run
 | `common.py` | Database name, model names, and the ASIN-to-ID helper. |
 | `dev_set.jsonl` | The 14 questions and their answer keys. |
 | `credentials.py` | Unlocks the encrypted key. You don't run this directly. |
+| `submit.py` | Checks your function and opens the submission form. |
 | `fixture/` | The local copy of 2,000 products. |
