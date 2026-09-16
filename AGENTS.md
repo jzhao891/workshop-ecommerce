@@ -91,8 +91,11 @@ from common import point_id_for_asin
 point_id_for_asin("B07XYZ1234")   # re-derives it, no lookup
 ```
 
-Or filter on the indexed `asin` payload field. Passing a raw ASIN where a point
-id is expected does not raise — it just matches nothing.
+Or filter on the indexed `asin` payload field. The two mistakes fail
+differently: a raw ASIN passed where a point id belongs (`HasIdCondition`,
+`RecommendInput.positive`) is a 400 Bad Request and you find out at once, while
+a point id passed where the `asin` field is expected returns zero hits and no
+error, which reads as "my query found nothing".
 
 ## How to check your work
 

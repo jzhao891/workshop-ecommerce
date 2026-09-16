@@ -205,6 +205,15 @@ any positive — keeps distinct positives distinct), `SUM_SCORES`.
 `common.point_id_for_asin(asin)` re-derives one with no lookup. You can also
 filter on the indexed `asin` field instead.
 
+Measured, because the two ways of confusing them do not fail alike: an ASIN in
+a point-id slot (`HasIdCondition`, `RecommendInput.positive`) returns **400 Bad
+Request**; a point id in `FieldCondition(key="asin", ...)` returns **zero hits,
+no error**. The loud one costs you a minute, the quiet one costs you the
+exercise.
+
+`RecommendQuery` excludes the seed point from its own results, so a seed you
+pass as `positive` does not come back and waste a slot in your top 10.
+
 ## `MMR` — diversity in the result list
 
 Maximal Marginal Relevance re-ranks a candidate pool to trade a little relevance

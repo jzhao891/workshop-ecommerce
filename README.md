@@ -77,8 +77,12 @@ models.RecommendInput(positive=[pid])
 models.FieldCondition(key="asin", match=models.MatchValue(value=seed_asin))
 ```
 
-Passing a raw ASIN where a point ID is expected does not raise an error. It just
-quietly matches nothing.
+Getting this backwards fails in two different ways, and only one of them is
+loud. Passing a raw ASIN where a point ID belongs — `HasIdCondition(has_id=[...])`,
+`RecommendInput(positive=[...])` — is a **400 Bad Request**, so you find out
+immediately. Passing a point ID where the `asin` field is expected returns
+**zero results and no error at all**, which looks like a query that simply found
+nothing.
 
 ## What you have to work with
 
