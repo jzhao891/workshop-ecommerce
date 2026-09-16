@@ -148,7 +148,16 @@ def score_one(case: dict, points) -> dict:
 
 def run_case(client, case, raw_ok):
     try:
-        req = build_query(case["query"], case.get("seed_asin"))
+        req = build_query(case["query"], case.get("seed_asin"), case.get("constraints"))
+    except TypeError as e:
+        # Almost always the old two-argument signature. Say so, rather than
+        # letting it read as a bug inside their own code.
+        if "positional argument" in str(e) or "argument" in str(e):
+            return dict(id=case["id"], segment=case["segment"],
+                        error="build_query must take three arguments: "
+                              "(query_text, seed_asin, constraints)")
+        return dict(id=case["id"], segment=case["segment"],
+                    error=f"build_query raised: TypeError: {e}")
     except Exception as e:
         return dict(id=case["id"], segment=case["segment"], error=f"build_query raised: {e}")
 

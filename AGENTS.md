@@ -8,11 +8,31 @@ minutes and a leaderboard. Read this before writing code.
 Implement exactly one function, in `build_query.py`, and change nothing else:
 
 ```python
-build_query(query_text: str, seed_asin: str | None) -> models.QueryRequest
+build_query(query_text: str, seed_asin: str | None,
+            constraints: dict | None) -> models.QueryRequest
 ```
 
 It **returns a request**. It does not execute one. There is no client in scope
 and no results to inspect. `harness.py` executes what you return and scores it.
+
+## The constraints argument
+
+`constraints` is what the scorer checks the top 10 against; breaking one scores
+that query zero. It arrives structured -- do not parse it out of `query_text`.
+`None` on most questions. Five possible keys, and the hidden set can use one the
+visible questions never do, so handle all five rather than the ones you see:
+
+| key | type | filter it maps to |
+|---|---|---|
+| `max_price` | float | `FieldCondition(key="price", range=Range(lte=...))` |
+| `min_price` | float | `FieldCondition(key="price", range=Range(gte=...))` |
+| `min_rating` | float | `FieldCondition(key="rating", range=Range(gte=...))` |
+| `in_stock` | bool | `FieldCondition(key="in_stock", match=MatchValue(...))` |
+| `brand` | str | `FieldCondition(key="brand", match=MatchValue(...))` |
+
+A constraint is a hard limit. It belongs in a `Filter`, which removes points. A
+decay function or a `FormulaQuery` reorders points, and a demoted point is still
+in the top 10.
 
 ## Hard rules
 

@@ -110,6 +110,12 @@ list with a formula" — that is a prefetch containing prefetches.
 
 ## Filters
 
+The `constraints` argument handed to `build_query` maps straight onto these.
+`max_price` and `min_price` are a `Range` on `price`, `min_rating` a `Range` on
+`rating`, and `in_stock` and `brand` are a `MatchValue` on their own field. Put
+them in `must`, because a constraint that merely lowers a score is not a
+constraint.
+
 ```python
 models.Filter(
     must=[                      # AND

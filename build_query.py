@@ -3,7 +3,9 @@
 Implement build_query(). You return a request. You never execute it, you never
 see the results. The harness executes it and scores what comes back.
 
-    build_query(query_text: str, seed_asin: str | None) -> models.QueryRequest
+    build_query(query_text: str,
+                seed_asin: str | None,
+                constraints: dict | None) -> models.QueryRequest
 
 Rules (the harness enforces the first one, the other two are on your honour):
   1. ONE request per search. One models.QueryRequest. Prefetch as much as you
@@ -13,6 +15,20 @@ Rules (the harness enforces the first one, the other two are on your honour):
   3. No network calls at query time. No embedding API, no product lookup, no
      scraping. models.Document is not a network call on your side -- it is a
      field in the request that Qdrant resolves.
+
+`constraints` is what the scorer will check your top 10 against. Break one and
+that query scores zero, however good the other nine results were. It arrives
+structured, the way a storefront gets facets from the UI rather than by reading
+the search box. It is None on most questions. The five possible keys:
+
+    max_price   float   no result may cost more than this  -> price
+    min_price   float   no result may cost less than this  -> price
+    min_rating  float   no result may be rated below this  -> rating
+    in_stock    bool    every result must match this       -> in_stock
+    brand       str     every result must match this       -> brand
+
+Read the keys, not the examples: handle all five and you are done, whatever any
+individual question happens to use.
 
 seed_asin is an ASIN (e.g. "B07XYZ1234"), NOT a point id. Point ids are
 UUIDv5 over the ASIN. Two ways to use one, both fine:
@@ -34,13 +50,15 @@ from common import DENSE_MODEL
 TOP_K = 10  # the harness scores precision@10; returning fewer can only hurt
 
 
-def build_query(query_text: str, seed_asin: str | None = None) -> models.QueryRequest:
+def build_query(query_text: str,
+                seed_asin: str | None = None,
+                constraints: dict | None = None) -> models.QueryRequest:
     """Naive dense-only baseline. It runs. It scores badly. That is the point.
 
     What it ignores, all of which is on the table:
       * `sparse` (BM25) -- so "Kestrel TR-450" is a coin flip
       * seed_asin entirely
-      * every hard constraint in the query text ("under $80", "in stock")
+      * every constraint, so it takes hard violations and scores zero on them
       * SearchParams, oversampling, rescore
       * FormulaQuery, decay, Recommend, the `image` vector
 

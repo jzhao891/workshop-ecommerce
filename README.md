@@ -44,7 +44,9 @@ need to read to get unstuck.
 One function, in `build_query.py`:
 
 ```python
-def build_query(query_text: str, seed_asin: str | None) -> models.QueryRequest:
+def build_query(query_text: str,
+                seed_asin: str | None,
+                constraints: dict | None) -> models.QueryRequest:
     ...
 ```
 
@@ -54,6 +56,32 @@ results. A scoring program runs it for you and grades what comes back.
 The file already contains a working version. It's deliberately basic: it runs,
 and it scores poorly. Replace the body of the function, and keep the name and
 arguments the same.
+
+### The Constraints Argument
+
+`constraints` is what the scorer checks your top 10 against. Break one and that
+question scores zero, however good the other nine results were.
+
+It arrives already structured, the way a real store receives filters from the
+search page rather than by reading the search box. Most questions pass `None`.
+
+There are five possible keys. Handle all five and you're finished, whatever any
+individual question happens to use:
+
+| Key | Type | Means | Field to filter |
+|---|---|---|---|
+| `max_price` | float | No result may cost more than this. | `price` |
+| `min_price` | float | No result may cost less than this. | `price` |
+| `min_rating` | float | No result may be rated below this. | `rating` |
+| `in_stock` | bool | Every result must match this. | `in_stock` |
+| `brand` | str | Every result must match this. | `brand` |
+
+Read the keys rather than copying the examples. A question in the hidden set can
+use a key that none of the 14 visible questions happen to use.
+
+A constraint is a **hard limit**, so it belongs in a filter, which removes
+products. A decay function or a score boost reorders products instead, and
+something ranked lower is still in your top 10.
 
 ### Three Rules
 
@@ -171,10 +199,10 @@ them.
 - **P@10**, short for precision at 10, counts how many of your top 10 results
   were correct. There's an answer key: 14 questions, each with a list of correct
   products.
-- **viol** counts questions where you broke a stated limit. If the shopper asked
-  for "under $50" and one result costs $60, that entire question scores **zero**,
-  however good the other nine results were. This is the harshest rule here, and
-  it's deliberate.
+- **viol** counts questions where you broke a limit from the `constraints`
+  argument. If it says `max_price` is 50 and one result costs $60, that entire
+  question scores **zero**, however good the other nine results were. This is
+  the harshest rule here, and it's deliberate.
 - **stock** shows how much of your top 10 a shopper could buy today.
 - **brands** counts how many different brands appear in your top 10, ignoring the
   placeholder brand `"Unknown"`. A page of 10 unbranded items shouldn't count as
