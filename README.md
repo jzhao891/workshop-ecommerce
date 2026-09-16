@@ -36,8 +36,8 @@ When everything works, you get one green line. When something's wrong, you get
 the name of the check that failed and the fix for it. That's the only file you
 need to read to get unstuck.
 
-**Please run this before the session, not during it.** Forty people debugging
-their setup at the same time is how an hour disappears.
+**Please run this before the session, not during it.** An hour disappears when
+40 people debug their setup at the same time.
 
 ## What You Write
 
@@ -177,7 +177,8 @@ them.
   it's deliberate.
 - **stock** shows how much of your top 10 a shopper could buy today.
 - **brands** counts how many different brands appear in your top 10, ignoring the
-  placeholder brand `"Unknown"`. Ten unbranded items shouldn't count as variety.
+  placeholder brand `"Unknown"`. A page of 10 unbranded items shouldn't count as
+  variety.
 - **was** repeats the same number from your previous run, and appears only when
   the number changed. The loop is: change one thing, run it again, and see which
   way it moved. You don't need to keep notes. Small wobbles between identical
@@ -266,7 +267,8 @@ python fixture/verify_api.py    # check the reference examples still run
 
 ## When Something Breaks
 
-- **A "rate limited" message, or error 429.** Forty people share one database.
+- **A "rate limited" message, or error 429.** You share one database with about
+  40 other people.
   Wait a few seconds and run it again. This isn't a problem with your query. The
   scoring program deliberately sends only four requests at a time, so please
   leave that setting alone.
