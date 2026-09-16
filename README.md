@@ -1,15 +1,16 @@
 # E-commerce search workshop
 
-You have one function to write and 90 minutes. Everything else in this repo
-exists to score it.
+You write one function. You have 90 minutes. Everything else in this repo exists
+to score that function.
 
-The corpus is 100,000 Amazon clothing/shoes/jewelry products in Qdrant, with a
-dense vector, a BM25 sparse vector, and a CLIP image vector on a fifth of them.
-Your job is to turn a shopper's query into the best single Qdrant request you
-can.
+There are 100,000 real Amazon products — clothes, shoes, jewellery — already
+loaded into a Qdrant database. Your job is to take what a shopper typed and turn
+it into the best possible database query.
 
-No vector search experience assumed. If you brought a coding agent, point it at
-`AGENTS.md` first.
+You don't need to have used vector search before. Nothing here assumes it.
+
+If you brought a coding agent, point it at `AGENTS.md` first. If you didn't, or
+your laptop blocks them, everything here works fine by hand.
 
 ---
 
@@ -21,247 +22,254 @@ pip install -r requirements.txt
 python setup_check.py
 ```
 
-There is no key to paste. The cluster URL and a read-only API key ship in this
-repo sealed as `.env.enc`, and `setup_check.py` asks once for the workshop
-password — the facilitator reads it out at the start of the session — then
-writes a `.env` for you. Nothing echoes while you type it, and `.env` is
-gitignored.
+There's no API key to copy and paste. The database address and a read-only key
+are already in this repo, encrypted. `setup_check.py` asks once for the workshop
+password — the facilitator says it out loud at the start — and writes the
+credentials to a `.env` file for you. Nothing shows on screen while you type the
+password, and `.env` never gets committed.
 
-If you are doing this before the session and do not have the password yet, run
-the two lines above; the check will tell you what it is waiting for.
+Doing this early and don't have the password yet? Run the three lines anyway.
+The check will tell you what it's waiting for.
 
-`setup_check.py` prints one green line when you are ready. If it fails it names
-the check and the fix — that is the only file you need to read to get unstuck.
-It also confirms the key has not expired and is read-only — without writing
-anything — and reports how many points carry an `image` vector.
-**Do this before the session, not during it.**
+When everything is fine you get one green line. When it isn't, you get the name
+of the check that failed and what to do about it. That's the only file you need
+to read to get unstuck. **Please run it before the session, not during it** —
+forty people debugging their setup at once is how an hour disappears.
 
-## The contract
+## What you actually write
 
-You implement exactly one function, in `build_query.py`:
+One function, in `build_query.py`:
 
 ```python
 def build_query(query_text: str, seed_asin: str | None) -> models.QueryRequest:
     ...
 ```
 
-You **return a request**. You never execute it and you never see results. The
-harness executes it and scores what comes back. `build_query.py` ships with a
-naive dense-only version that runs and scores badly; replace the body, keep the
-signature.
+You **build a query and hand it back**. You don't run it, and you never see the
+results. A test harness runs it for you and scores what comes back.
 
-### Rules
+The file already contains a working version. It's deliberately basic — it works,
+and it scores badly. Replace the inside of the function and keep the name and
+arguments the same.
 
-1. **One request per search.** One `models.QueryRequest`. Prefetch as much as
-   you like inside it — that is still one request.
-2. **No client-side reranking.** No reordering or filtering after the fact.
-3. **No network calls at query time.** `models.Document` is not a network call
-   on your side; it is a field in the request that Qdrant resolves.
+### Three rules
 
-Edit `build_query.py`. Leave `common.py`, `harness.py`, `setup_check.py`,
-`dev_set.jsonl` and `fixture/` alone.
+1. **One query per search.** You return a single request object. You can nest as
+   much as you like inside it — that still counts as one.
+2. **No sorting or filtering the results afterwards.** You never get the results,
+   so there's nothing to sort anyway.
+3. **No calling other services while building the query.** No embedding APIs, no
+   lookups. (Asking Qdrant to turn your text into a vector doesn't count — that's
+   part of the request, not a separate call you make.)
 
-## ASINs are not point IDs
+Edit `build_query.py`. Leave everything else alone.
 
-`seed_asin` is an ASIN like `B07XYZ1234`. Point IDs are **UUIDv5 over the
-ASIN**, namespace `6f1d6b1e-0b3f-5c2a-9b77-4a1c7e9d2f01`. Two ways to use one:
+## The catalogue
+
+Every product is stored three different ways, and you choose which one to search.
+
+| name | what it is |
+|---|---|
+| `dense` | The meaning of the title, as 384 numbers. Good at "sneakers" matching "trainers". Bad at exact codes. |
+| `sparse` | Classic keyword matching (BM25). Nails exact words and model numbers. Useless when the shopper's words don't appear in the product title. |
+| `image` | The product photo, as 512 numbers. Only 19,997 of the 100,000 products have one. |
+
+Each product also carries fields you can filter on: `brand`, `category_path`,
+`price`, `rating`, `review_count`, `in_stock`, `margin` and `asin`.
+
+Note that the product **title is not filterable**. If you want to match words in
+a title, that's what `sparse` is for.
+
+You have a read-only key, so you can't add new fields or indexes — what's listed
+above is what exists.
+
+## Product IDs are not ASINs
+
+Some questions hand you a `seed_asin` — an Amazon product code like
+`B07XYZ1234`, meaning "find me more things like this one".
+
+Qdrant doesn't store products under their ASIN. It uses an ID derived from it.
+There's a helper that does the conversion with no database lookup:
 
 ```python
 from common import point_id_for_asin
-pid = point_id_for_asin(seed_asin)        # re-derive it, no lookup needed
-models.RecommendInput(positive=[pid])
+pid = point_id_for_asin(seed_asin)
 ```
 
+Or you can skip IDs entirely and filter on the `asin` field instead:
+
 ```python
-# or filter on the indexed `asin` payload field
 models.FieldCondition(key="asin", match=models.MatchValue(value=seed_asin))
 ```
 
-Getting this backwards fails in two different ways, and only one of them is
-loud. Passing a raw ASIN where a point ID belongs — `HasIdCondition(has_id=[...])`,
-`RecommendInput(positive=[...])` — is a **400 Bad Request**, so you find out
-immediately. Passing a point ID where the `asin` field is expected returns
-**zero results and no error at all**, which looks like a query that simply found
-nothing.
+Mixing the two up fails in two different ways, and only one is obvious. Using an
+ASIN where an ID belongs gives you a **400 error** straight away. Using an ID
+where the `asin` field is expected gives you **zero results and no error**, which
+looks exactly like a query that just didn't find anything.
 
-## What you have to work with
+## What you can use
 
-The collection — names, dimensions and indexes are fixed, and your key is
-read-only so you cannot add to them:
+Roughly most useful first. Working examples for all of these are in
+[`docs/query-api.md`](docs/query-api.md) — worth reading, because a few of them
+will happily return a confident-looking list of wrong answers.
 
-| vector | dim | distance | built from |
-|---|---|---|---|
-| `dense` | 384 | Cosine | `sentence-transformers/all-minilm-l6-v2` over `"{title}. {category_path}"` |
-| `image` | 512 | Cosine | `qdrant/clip-vit-b-32-vision`, **present on only 19,997 of 100,000 points** |
-| `sparse` | — | — | `qdrant/bm25`, `modifier=idf` |
-
-Filterable payload: `brand` (keyword) · `category_path` (keyword) · `price`
-(float) · `rating` (float) · `review_count` (integer) · `in_stock` (bool) ·
-`margin` (float) · `asin` (keyword). `title` is **not** indexed — match text
-through `sparse`.
-
-### Capability menu
-
-Roughly in order of how much they usually buy you. Full reference with runnable
-examples — and the failure modes each one has — is in
-[`docs/query-api.md`](docs/query-api.md). Read it before you reach for `image`
-or a score formula; there are a few ways to get a plausible-looking ranked list
-out of a query that is quietly wrong.
-
-| lever | what it does |
+| tool | what it does |
 |---|---|
-| **Hybrid** — `prefetch` + `FusionQuery(RRF)` | dense and BM25 in one request. The biggest single win. `DBSF` if you want score-based fusion instead of rank-based. |
-| **Filters** — `Filter(must/should/must_not)`, `Range` | hard constraints. Put them on the prefetches *and* the outer request. |
-| **`SearchParams`** — `QuantizationSearchParams(oversampling, rescore)` | vectors are int8-quantized; oversample and rescore against the originals to win back precision. |
-| **`FormulaQuery`** | re-score a prefetched list using payload — margin, reviews, stock. |
-| **Decay** — `lin` / `exp` / `gauss` | soft preference along a number (price near $60) instead of a hard cut. |
-| **`Recommend`** | more-like-this from `seed_asin`. Strategies: `average_vector`, `best_score`, `sum_scores`. |
-| **`image`** | visual similarity. Read the vector table above before you use it. |
-| **Weighted RRF** — `RrfQuery(rrf=Rrf(weights=...))` | make one retriever count more than the other. |
-| **MMR** — `NearestQuery(nearest=..., mmr=Mmr(diversity=...))` | trade a little relevance for a less repetitive top 10. The direct lever on brand diversity. |
+| **Hybrid search** | Search `dense` and `sparse` at the same time and merge the results. Usually the single biggest improvement available. |
+| **Filters** | Hard limits: under $50, in stock, this brand only. |
+| **Search settings** | The vectors are compressed for speed. You can ask for a wider first pass and a more accurate re-check. |
+| **Score formulas** | Adjust ranking using product fields — margin, review counts, stock. |
+| **Decay functions** | "Prefer around $60" rather than "nothing over $60". |
+| **Recommend** | More-like-this, starting from a product rather than text. |
+| **Image search** | Visual similarity. Read the table above before using it. |
+| **Weighted merging** | Make keyword matching count for more than meaning, or the reverse. |
+| **MMR** | Stop the top ten being ten near-identical products. |
 
 ## Scoring
 
-The dev set is 14 queries judged against the real 100,000-point collection.
-**A dense-only `build_query` scores 0.536 and takes 4 hard-constraint
-violations. The best we have measured is 0.721, with zero violations.** That is
-a straightforward hybrid, and it is not a ceiling anyone should treat as one —
-`constrained` sits at 0.55 and `natural_language` at 0.30 in that run, so there
-is real room above it. Do not read a total below 1.0 as a bug.
-
-A larger held-out set stays with the facilitator. The 14 here teach you the
-rubric; the held-out set is the check on whether a change helps in general or
-only on the queries you can see. Tuning to these 14 is visible from the outside.
-
 ```bash
-python harness.py              # run the dev set, print the scorecard
-python harness.py --show q03   # dump the actual top 10 for one query
-python harness.py --html       # the same run as a product grid in your browser
+python harness.py              # score yourself
+python harness.py --show dev03 # see the actual top 10 for one question
+python harness.py --html       # see the results as product photos in your browser
 ```
 
-`--html` is worth your time. Product search is visual: a sandal returned for a
-boot query is obvious in a picture and invisible in a list of titles. The page
-writes to `.workshop/results.html` and opens itself, one row of ten cards per
-query, with a **green** border on results the dev set judged relevant, **red**
-on any result that breaks a hard constraint, and the reason underneath it. Re-run
-the command and refresh.
-
-Against the cluster those are the real product photos. Against the local fixture
-the products are invented and their image URLs are synthetic, so the cards fall
-back to coloured tiles and the page says so.
+You get a table like this — this is what the starter code scores, so it's your
+floor:
 
 ```
 segment              P@10    was  viol  stock  brands  n
 ------------------------------------------------------------
-head_term           0.300            0   0.55    0.63  2
-exact_model         1.000  0.250     0   0.57    0.10  4
-constrained         0.950  0.000     0   1.00    0.80  2
-...
+head_term           1.000            0   0.80    1.00  1
+exact_model         0.667            0   0.50    0.17  3
+constrained         0.000            4   0.68    0.72  4
+natural_language    0.600            0   0.87    0.90  3
+similar_item        0.900            0   0.90    0.10  1
+long_tail           0.900            0   0.70    0.80  2
 ------------------------------------------------------------
-OVERALL             0.693  0.314     0   0.64    0.56  14
+OVERALL             0.536            4   0.71    0.63  14
 
-build_query names 2 of the 3 vectors this collection carries (dense, sparse)
+build_query names 1 of the 3 vectors this collection carries (dense)
 ```
 
-- **precision@10** — relevant results in the top 10, over `min(10, |relevant|)`.
-  Judgments are **predicate-derived, not hand-labelled**: each query states a
-  rule over payload, and every point satisfying it counts as relevant. The rule
-  travels with the query in the `judgment` field, so you can audit it, and
-  argue with it.
-- **hard constraint violations** — if any of your top 10 breaks a stated
-  constraint ("under $80", "in stock"), that query scores **zero**, however good
-  the rest of it was.
-- **p95 latency** — server-side, read from Qdrant's own timing, not wall clock.
-- **in-stock rate** — share of the top 10 that is actually buyable.
-- **brand diversity** — distinct brands in the top 10, **excluding `"Unknown"`**.
-  `"Unknown"` is a placeholder for a missing store name, not a brand; counting
-  it would pay you for returning junk.
-- **`was`** — the same figure from your previous run, shown only where it moved.
-  Change one thing, re-run, see which way it went. You do not have to keep notes.
-  Approximate search returns a slightly different set each time, so a segment can
-  drift a few hundredths between identical runs, and a rebuilt fixture shifts it
-  further. Chase changes you can explain, not the last digit.
+**The starter scores 0.536 and breaks four rules about price and stock. The best
+we've measured is 0.721 with none broken.** A score below 1.0 isn't a bug —
+nobody has reached it, and two whole categories of question still have obvious
+room in them.
 
-The line under the table counts how many of the collection's three vectors your
-`build_query` even mentions. It says nothing about whether you used them well —
-it is a grep, not a judgement — but one of three is worth noticing.
+### Reading the columns
 
-### The six segments
+- **P@10** — out of your top ten results, how many were right. There's an answer
+  key: 14 questions, each with a list of correct products.
+- **viol** — questions where you broke a stated limit. If the shopper said "under
+  $50" and one result costs $60, that whole question scores **zero**, no matter
+  how good the other nine were. This is the harshest rule here and it's
+  deliberate.
+- **stock** — how much of your top ten is actually buyable.
+- **brands** — how many different brands are in your top ten, ignoring the
+  placeholder brand `"Unknown"`. A page of ten unbranded items shouldn't count as
+  variety.
+- **was** — the same number from your last run, shown only when it changed. So
+  the loop is: change one thing, run it again, see which way it moved. No need to
+  keep notes. Small wobbles between identical runs are normal — the search is
+  approximate — so chase changes you can explain, not the last decimal place.
 
-| segment | what it is |
+The line underneath counts how many of the three vectors your code even mentions.
+It's a crude check, not a judgement, but one out of three is worth noticing.
+
+`--html` is worth your time. Product search is visual. A sandal returned for a
+boot query is obvious in a photo and invisible in a list of titles. It writes a
+page and opens it: one row of product cards per question, **green** where the
+answer key agrees with you, **red** where you broke a price or stock limit, with
+the reason underneath.
+
+### Where the answer key comes from
+
+Each question has a **rule** rather than a human verdict. "Baseball caps" counts
+anything filed under baseball caps; "under $20, in stock" adds those two
+conditions. The rule is written next to every question in `dev_set.jsonl`, so you
+can read it and disagree with it.
+
+It's blunt. A genuinely good result that falls outside the rule is marked wrong.
+That's the honest cost of scoring 100,000 products without a human reading them.
+
+**There's a second, larger set of questions you don't get**, kept by the
+facilitator. The 14 here teach you what's being measured; the hidden set checks
+whether your changes actually help in general, or only on the questions you could
+see. Tuning to these 14 specifically is visible from the outside.
+
+### The six kinds of question
+
+| kind | what it is |
 |---|---|
-| `head_term` | broad category queries — "running shoes", "backpack" |
-| `exact_model` | brand + model number. Dense alone struggles; this is where hybrid shows up. |
-| `constrained` | hard constraints in the text — "under $80", "in stock" |
-| `natural_language` | descriptive intent with little keyword overlap |
-| `similar_item` | driven by `seed_asin` — more like this one |
-| `long_tail` | rare, specific phrasing with small relevant sets |
+| `head_term` | Broad category searches — "baseball caps". |
+| `exact_model` | A brand and a model number — "CARTIER W51012Q4". |
+| `constrained` | Limits in the sentence — "under $40, in stock only". |
+| `natural_language` | Described, not named — "a watch I can wear swimming". |
+| `similar_item` | "More like this one", starting from a product. |
+| `long_tail` | Rare, specific phrasing — "merino wool base layer". |
 
-A good answer is not one trick, and the measurements say so plainly. Going from
-dense-only to a dense+BM25 hybrid takes `exact_model` from 0.667 to 1.000 — and
-takes `natural_language` from 0.600 **down** to 0.300, because a descriptive
-query gives BM25 nothing to match. `head_term` sits at 1.000 either way; a broad
-term over a 1,500-point category is free precision, here and in real life.
+**No single trick wins all six**, and the numbers say so bluntly. Turning on
+hybrid search takes `exact_model` from 0.667 up to 1.000 — and takes
+`natural_language` from 0.600 **down** to 0.300, because when a shopper describes
+something in their own words, keyword matching has nothing to grab onto and drags
+in junk. Meanwhile `head_term` sits at 1.000 whatever you do.
 
-The thing that wins `exact_model` is not the thing that wins
-`natural_language`. Anything you apply to every query uniformly will pay for one
-segment with another.
+Whatever you apply to every question uniformly, you'll pay for one kind of
+question with another.
 
-## Working offline, or against a local Qdrant
+## Running against a local copy instead
 
-The cluster is shared. If you would rather develop against your own copy, there
-is a local fixture: a 2,000-point collection under podman that matches the
-schema contract exactly.
+The cluster is shared by everyone in the room. If you'd rather work against your
+own copy, there's a small local one — 2,000 made-up products in the same shape —
+that runs in a container:
 
 ```bash
-bash fixture/up.sh            # start Qdrant 1.19.1 + seed it
-# then set QDRANT_URL=http://localhost:6333 in .env
+bash fixture/up.sh            # start it and fill it
+# then put QDRANT_URL=http://localhost:6333 in your .env
 python harness.py
 ```
 
-`build_query()` does not change between the two. The only difference is a client
-flag: locally `cloud_inference=False` and FastEmbed embeds your `Document` on
-your machine; against the cluster `cloud_inference=True` and Qdrant Cloud
-Inference embeds it server-side. Same request either way.
+Your `build_query` doesn't change between the two. The only difference is one
+setting: locally your text gets turned into vectors on your laptop, and against
+the cluster Qdrant does it. Same request either way.
 
-**The fixture exists to exercise code paths, not to tune relevance.** 2,000
-invented products, and its `image` vectors are deterministic noise rather than
-real CLIP embeddings — image queries run, but their ranking means nothing
-locally.
+**The local copy is for checking that your code runs, not whether it's any
+good.** The products are invented and the images are random noise, so image
+searches will execute and mean nothing.
 
-There are two dev sets and they are not interchangeable. `dev_set.jsonl` is the
-real one, judged against the cluster. `fixture/dev_set.fixture.jsonl` is a
-placeholder judged against the fixture, every row marked `"placeholder": true`.
-The harness picks whichever matches the URL you point it at, because running the
-real set against the fixture scores a flat zero and looks like your bug.
+There are two answer keys and they don't mix. `dev_set.jsonl` is the real one.
+`fixture/dev_set.fixture.jsonl` is a stand-in for the local copy. The harness
+picks whichever matches the database you're pointed at — using the real answer
+key against the made-up products would score a flat zero and look like your bug.
 
 ```bash
-bash fixture/up.sh --recreate   # reseed from scratch
-bash fixture/up.sh --down       # stop it (keeps the data)
-python fixture/verify_api.py    # check every shape in docs/query-api.md still runs
+bash fixture/up.sh --recreate   # wipe and refill
+bash fixture/up.sh --down       # stop it, keep the data
+python fixture/verify_api.py    # check the examples in docs/query-api.md still run
 ```
 
-## If something breaks
+## When something breaks
 
-- **429 / "rate limited"** — ~40 people share one cluster and Cloud Inference
-  throttles. Wait a moment and re-run. Not a bug in your query. The harness caps
-  concurrency at 4 for this reason; leave it there.
-- **Zero, few, or nonsense results from an image query** — `image` is not like
-  the other two vectors. Re-read its row in the vector table, check which model
-  built it, and count how many points actually carry one.
-- **`build_query returned X, expected models.QueryRequest`** — you returned a
-  response, a list, or `None`.
-- **Anything else** — `python setup_check.py` first.
+- **"rate limited" or a 429** — forty people, one database. Wait a few seconds and
+  run it again. It isn't your query. The harness deliberately only makes four
+  requests at a time; please leave that alone.
+- **An image search returns nothing, or nonsense** — `image` doesn't behave like
+  the other two. Re-read its row in the table above, check which model built it,
+  and check how many products actually have one.
+- **"build_query returned X, expected models.QueryRequest"** — you returned
+  results, a list, or nothing, instead of a query.
+- **Anything else** — run `python setup_check.py` first.
 
-## Files
+## What's in here
 
 | file | |
 |---|---|
 | `build_query.py` | **the only file you edit** |
-| `README.md` / `AGENTS.md` | this, and the same for coding agents |
-| `docs/query-api.md` | Query API reference, every snippet executed before shipping |
-| `harness.py` | runs the dev set and scores you |
-| `setup_check.py` | pre-work gate |
-| `common.py` | collection name, model ids, `point_id_for_asin` |
-| `dev_set.jsonl` | placeholder queries + judgments |
-| `fixture/` | local podman Qdrant, seeder, API check |
+| `README.md` / `AGENTS.md` | this, and the same thing written for coding agents |
+| `docs/query-api.md` | what you can put in a query, with working examples |
+| `harness.py` | runs the questions and scores you |
+| `setup_check.py` | the pre-workshop check |
+| `common.py` | database name, model names, the ASIN-to-ID helper |
+| `dev_set.jsonl` | the 14 questions and their answer keys |
+| `credentials.py` | unlocks the encrypted key; you don't run this directly |
+| `fixture/` | the local 2,000-product copy |
