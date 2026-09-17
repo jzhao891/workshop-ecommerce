@@ -1,3 +1,112 @@
+# My Solution — 0.921 P@10, zero violations
+
+`build_query.py` is the only file changed. Starter code scores 0.536; the best
+previously measured is 0.721.
+
+```
+segment              P@10   viol  stock  brands  n
+head_term           1.000      0   0.90    1.00  1
+exact_model         1.000      0   0.57    0.13  3
+constrained         1.000      0   1.00    0.97  4
+natural_language    0.633      0   0.87    0.90  3
+similar_item        1.000      0   1.00    0.10  1
+long_tail           1.000      0   0.70    0.65  2
+------------------------------------------------------------
+OVERALL             0.921      0   0.83    0.66  14
+```
+
+Stable across three consecutive runs. p95 latency ~37 ms server-side.
+
+## How it got there
+
+| # | Change | Effect |
+|---|---|---|
+| 1 | Constraints as hard `must` filters, on both prefetches and the outer request | violations 4 → 0 |
+| 2 | Hybrid dense+sparse over weighted RRF | `exact_model` 0.667 → 1.000 |
+| 3 | Route described queries to dense alone | `natural_language` 0.300 → 0.633 |
+| 4 | `RecommendQuery` off the seed's own vector | `similar_item` 0.900 → 1.000 |
+| 5 | Oversampling + rescore on the quantized vectors | +0.014 (within noise) |
+| 6 | **Strip constraint language from the query text** | **`constrained` 0.625 → 1.000** |
+
+Running total: 0.543 → 0.714 → 0.800 → 0.804 → 0.814 → **0.921**
+
+The largest single win was the cheapest change in the file, and it was not a
+Qdrant feature at all. `constraints` arrives structured, so the words restating
+it in the query text are redundant — and actively harmful, because BM25 happily
+matches "stock" and "only" against product titles. Stripping them turns
+`'baseball caps under $20, in stock only'` into `'baseball caps'`.
+
+Query shape decides the plan. The router keys on **grammar, not vocabulary** —
+the share of tokens that are first-person need language ("I", "can", "my",
+"without"). That measured 0.33–0.36 on described queries and exactly 0.00 on
+every other kind, so the 0.15 threshold sits in open space rather than on a
+fitted boundary. Words never appearing in a product title are precisely the
+words BM25 cannot use.
+
+## Measured and rejected
+
+Recorded because the negative results were as informative as the wins.
+
+| Idea | Why it lost |
+|---|---|
+| Deeper prefetch (100, 150) | `exact_model` 1.000 → 0.667. Deeper lists mean more documents appear in *both* retrievers at mediocre ranks, and RRF's consensus property lets them outrank a sharp single-list #1 — exactly what an exact model code depends on. Breaks between 60 and 100. |
+| MMR, stock/rating boosting | `harness.py` computes `precision = 0.0 if violation else hits / denom`. Stock and brand diversity are printed but never scored, so this trades real relevance for an unscored column. |
+| Stripping grammatical scaffolding from prose queries | `natural_language` 0.633 → 0.467, and 0.300 with BM25 added back. The dense model is a *sentence* transformer; "watch wear swimming" is keyword soup outside its training distribution, and the swimming→waterproof bridge happens at sentence level. |
+| Downweighting BM25 instead of dropping it | Reached only 0.500 on prose vs 0.600 for dropping the prefetch. With RRF at `k=2`, even 3:1 weights leave the loser's top hit around rank 7 — inside the scored top 10. Weighting demotes a retriever; it cannot silence one. |
+| Hybrid on seeded queries | Scored identically (10/10) but pulled women's `LTP` watches for a men's `MTP` seed. The answer-key rule is blunt enough to count them; a shopper would not. |
+
+## Improvement plan
+
+**1. `natural_language` (0.633) — the only segment below 1.000.**
+
+Per query: dev09 **0.400**, dev10 0.700, dev11 0.800. The loss is concentrated
+in one query. Its judgment rule needs `category_path` containing `shirt` *and* a
+title carrying `moisture wicking` / `quick dry` / `dri-fit`, but the query is
+"a shirt that will not leave me soaked after a run" — a pure need→feature gap.
+Retrieval currently drifts to *waterproof outerwear*: a run jacket, a windproof
+shell, thermal gloves, a neck towel.
+
+Worth trying, roughly in order:
+
+- **MMR on the prose path.** Previously dismissed because diversity is unscored
+  — but that was the wrong argument here. dev09's top 10 is clogged with near
+  duplicates of a single wrong reading ("waterproof"). Breaking that cluster is
+  a *precision* play, not a diversity one, and could surface shirts sitting
+  just below the redundant block.
+- **A wider dense pool with `exact=True`** on the prose path only, to establish
+  whether the right products are being missed by HNSW or genuinely rank low.
+  Slow, but it separates a recall problem from a semantics problem — worth
+  knowing before tuning anything else.
+- **Nested prefetch**: dense over the sentence, then a second-stage sparse pass
+  over that candidate list. Different from the flat fusion already tested,
+  because BM25 would rescore a pool dense already judged relevant instead of
+  contributing its own candidates.
+
+Explicitly **not** planned: a synonym table mapping `swimming → waterproof`.
+It would spike all three visible queries and teach the hidden set nothing,
+which is the tuning the workshop guide warns is visible from outside.
+
+**2. Harden the constraint-strip regex.** It is the single biggest contributor
+and it is pattern-matched against four visible queries sharing one phrasing
+template. It is guarded (never empties a query, no-ops when `constraints` is
+absent), so unseen phrasings should degrade to today's behaviour rather than
+break — but that is a claim worth testing against invented phrasings such as
+"below £30", "no more than 40 dollars", "cheap".
+
+**3. Re-measure `SearchParams`.** The +0.014 sits inside the ±0.007 run-to-run
+noise. Kept on mechanism (accuracy recovery on int8-quantized vectors, not a
+relevance bet), but not actually demonstrated. More runs, or a wider `ef`
+sweep, would settle it.
+
+**4. Retire the A/B scaffolding.** Every experiment is behind a `QSHAPE_*`
+environment variable with the winning value as its default, which keeps the
+comparisons reproducible but leaves dead branches in the submitted file. Fold
+the chosen path down once the numbers stop moving.
+
+---
+
+*The original workshop guide follows.*
+
 # E-Commerce Search Workshop
 
 You write one function. You have 90 minutes. Everything else in this repository
